@@ -25,6 +25,9 @@ export default function ResourceExportModal(props) {
   // ✅ Export file state
   const [exportedFile, setExportedFile] = useState(null); // { blob, filename }
 
+  // ✅ Store URL (products only)
+  const [storeUrl, setStoreUrl] = useState("");
+
   // ✅ fetch default query from DB whenever resourceKey changes
   useEffect(() => {
     let cancelled = false;
@@ -34,6 +37,7 @@ export default function ResourceExportModal(props) {
       setSqlQuery("");
       setError("");
       setExportedFile(null); // Clear previous export when resource changes
+      setStoreUrl("");
 
       if (!resourceKey) {
         onQueryLoaded?.();
@@ -123,11 +127,21 @@ export default function ResourceExportModal(props) {
       setError("SQL query is empty.");
       return;
     }
+    const trimmedStoreUrl = String(storeUrl || "").trim();
+    if (resourceKey === "products" && !trimmedStoreUrl) {
+      setError("Store URL is required for products.");
+      return;
+    }
 
     try {
       setLoading(true);
       setError("");
       setExportedFile(null); // Clear previous export when starting new one
+
+      const finalQuery =
+        resourceKey === "products"
+          ? sqlQuery.replace(/\{\{STORE_URL\}\}/g, trimmedStoreUrl)
+          : sqlQuery;
 
       const res = await fetch(`/api/resources/sheet`, {
         method: "POST",
@@ -135,7 +149,7 @@ export default function ResourceExportModal(props) {
         body: JSON.stringify({
           id,
           resourceKey,
-          query: sqlQuery,
+          query: finalQuery,
         }),
       });
 
@@ -196,12 +210,31 @@ export default function ResourceExportModal(props) {
       accessibilityLabel="Resource export modal"
     >
       <s-stack gap="base">
-        <s-text tone="subdued">
-          Resource: <strong>{resourceKey || "—"}</strong>
-        </s-text>
-        <s-text tone="subdued">
-          id: <strong>{id || "—"}</strong>
-        </s-text>
+        <s-stack direction="inline" justifyContent="normal" alignItems="center" gap="base">
+          <s-stack gap="none">
+            <s-text tone="subdued">
+              Resource: <strong>{resourceKey || "—"}</strong>
+            </s-text>
+            <s-text tone="subdued">
+              id: <strong>{id || "—"}</strong>
+            </s-text>
+
+          </s-stack>
+          {resourceKey === "products" ? (
+            <s-stack>
+              <s-text-field
+                label="Store URL"
+                placeholder="https://example.com"
+                value={storeUrl}
+                required
+                disabled={loading || dbLoading}
+                onChange={(e) => setStoreUrl(e?.target?.value ?? e?.detail?.value ?? "")}
+              />
+            </s-stack>
+          ) : null}
+
+
+        </s-stack>
 
         {dbLoading ? <s-banner tone="info">Loading default query…</s-banner> : null}
 
@@ -265,6 +298,7 @@ export default function ResourceExportModal(props) {
           onClose?.();
           setError("");
           setExportedFile(null);
+          setStoreUrl("");
         }}
       >
         Close
