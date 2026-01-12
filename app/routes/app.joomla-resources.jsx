@@ -11,6 +11,7 @@ export default function ResourcesPage() {
 
     const [query, setQuery] = useState("");
     const [selectedResourceKey, setSelectedResourceKey] = useState("");
+    const [loadingResourceKey, setLoadingResourceKey] = useState("");
 
     const resources = useMemo(
         () => [
@@ -38,14 +39,6 @@ export default function ResourcesPage() {
                 badgeTone: "success",
                 icon: "order",
             },
-            {
-                key: "collections",
-                title: "Collections",
-                description: "Smart and manual groups",
-                status: "ready",
-                badgeTone: "success",
-                icon: "collection",
-            },
         ],
         []
     );
@@ -70,6 +63,11 @@ export default function ResourcesPage() {
 
     function openResource(resourceKey) {
         setSelectedResourceKey(resourceKey);
+        setLoadingResourceKey(resourceKey);
+    }
+
+    function handleResourceQueryLoaded() {
+        setLoadingResourceKey("");
     }
 
     return (
@@ -118,6 +116,7 @@ export default function ResourcesPage() {
                                         commandFor={MODAL_ID}
                                         command="--show"
                                         disabled={!id}
+                                        loading={loadingResourceKey === r.key}
                                         onClick={() => openResource(r.key)}
                                     >
                                         View
@@ -140,12 +139,14 @@ export default function ResourcesPage() {
                 modalId={MODAL_ID}
                 id={id}
                 resourceKey={selectedResourceKey}
+                onQueryLoaded={handleResourceQueryLoaded}
                 onSuccess={() => {
                     // If later you want to refresh something on success, do it here.
                 }}
                 onClose={() => {
                     // Optional: clear selection when closed
                     setSelectedResourceKey("");
+                    setLoadingResourceKey("");
                 }}
             />
         </s-page>

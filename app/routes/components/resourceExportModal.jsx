@@ -7,6 +7,7 @@ export default function ResourceExportModal(props) {
     resourceKey = "",
     onClose,
     onSuccess,
+    onQueryLoaded,
   } = props || {};
 
   const closeRef = useRef(null);
@@ -21,6 +22,9 @@ export default function ResourceExportModal(props) {
   // ✅ editor value (starts empty, then set from DB)
   const [sqlQuery, setSqlQuery] = useState("");
 
+  // ✅ Export file state
+  const [exportedFile, setExportedFile] = useState(null); // { blob, filename }
+
   // ✅ fetch default query from DB whenever resourceKey changes
   useEffect(() => {
     let cancelled = false;
@@ -29,8 +33,12 @@ export default function ResourceExportModal(props) {
       setDbDefaultSql("");
       setSqlQuery("");
       setError("");
+      setExportedFile(null); // Clear previous export when resource changes
 
-      if (!resourceKey) return;
+      if (!resourceKey) {
+        onQueryLoaded?.();
+        return;
+      }
 
       try {
         setDbLoading(true);
@@ -45,6 +53,7 @@ export default function ResourceExportModal(props) {
         if (!res.ok || !json?.status) {
           if (!cancelled) {
             setError(json?.message || "No SQL mapping found for this resource.");
+            onQueryLoaded?.();
           }
           return;
         }
@@ -59,13 +68,17 @@ export default function ResourceExportModal(props) {
           setDbDefaultSql(cleaned);
           setSqlQuery(cleaned);
           setError("");
+          onQueryLoaded?.();
         }
       } catch (e) {
         if (!cancelled) {
           setError(e?.message || "Failed to load SQL mapping from DB.");
+          onQueryLoaded?.();
         }
       } finally {
-        if (!cancelled) setDbLoading(false);
+        if (!cancelled) {
+          setDbLoading(false);
+        }
       }
     }
 
@@ -74,11 +87,27 @@ export default function ResourceExportModal(props) {
     return () => {
       cancelled = true;
     };
-  }, [resourceKey]);
+  }, [resourceKey, onQueryLoaded]);
 
   function hideModal() {
     closeRef.current?.click();
     onClose?.();
+  }
+
+  function downloadFile() {
+    if (!exportedFile) return;
+
+    const { blob, filename } = exportedFile;
+    const url = window.URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    window.URL.revokeObjectURL(url);
   }
 
   async function runQuery() {
@@ -98,6 +127,7 @@ export default function ResourceExportModal(props) {
     try {
       setLoading(true);
       setError("");
+      setExportedFile(null); // Clear previous export when starting new one
 
       const res = await fetch(`/api/resources/sheet`, {
         method: "POST",
@@ -141,16 +171,9 @@ export default function ResourceExportModal(props) {
       const filename = match?.[1] || `${resourceKey}_${id || "shop"}.xlsx`;
 
       const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
 
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-
-      window.URL.revokeObjectURL(url);
+      // Store the exported file instead of downloading immediately
+      setExportedFile({ blob, filename });
 
       onSuccess?.({ id, resourceKey, query: sqlQuery });
       // keep modal open
@@ -183,6 +206,17 @@ export default function ResourceExportModal(props) {
         {dbLoading ? <s-banner tone="info">Loading default query…</s-banner> : null}
 
         {error ? <s-banner tone="critical">{error}</s-banner> : null}
+
+        {exportedFile ? (
+          <s-banner tone="success">
+            <s-stack direction="inline" gap="base" alignItems="center" justifyContent="space-between">
+              <s-text>Excel file exported successfully!</s-text>
+              <s-button variant="primary" onClick={downloadFile}>
+                Download File
+              </s-button>
+            </s-stack>
+          </s-banner>
+        ) : null}
 
         <s-section heading="SQL query">
           <s-text-area
@@ -230,20 +264,31 @@ export default function ResourceExportModal(props) {
         onClick={() => {
           onClose?.();
           setError("");
+          setExportedFile(null);
         }}
       >
         Close
       </s-button>
 
-      <s-button
-        slot="primary-action"
-        variant="primary"
-        loading={loading}
-        disabled={loading || dbLoading || !id || !resourceKey || !String(sqlQuery || "").trim()}
-        onClick={runQuery}
-      >
-        {loading ? "Exporting..." : "Export Excel"}
-      </s-button>
+      {exportedFile ? (
+        <s-button
+          slot="primary-action"
+          variant="primary"
+          onClick={downloadFile}
+        >
+          Download File
+        </s-button>
+      ) : (
+        <s-button
+          slot="primary-action"
+          variant="primary"
+          loading={loading}
+          disabled={loading || dbLoading || !id || !resourceKey || !String(sqlQuery || "").trim()}
+          onClick={runQuery}
+        >
+          {loading ? "Exporting..." : "Export Excel"}
+        </s-button>
+      )}
     </s-modal>
   );
 }
