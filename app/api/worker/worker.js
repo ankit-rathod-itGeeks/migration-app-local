@@ -8,14 +8,34 @@ import { migrateCustomers } from "../utils/customerSync.js";
 import { migrateOrdersFromSheet } from "../utils/orderSync.js";
 
 const WORKER_ID = process.env.WORKER_ID || `${os.hostname()}-${process.pid}`;
-const MAX_JOBS_PER_KICK = Number(process.env.MAX_JOBS_PER_KICK || 2);
+
+/**
+ * How many jobs a SINGLE worker process should run in parallel.
+ * When you scale "across multiple worker processes", keep this small (1–2).
+ */
+const MAX_JOBS_PER_PROCESS = Number(process.env.MAX_JOBS_PER_PROCESS || 3);
+
+/**
+ * Lock TTL (minutes). If a worker dies mid-job, another worker can pick it up after TTL.
+ */
 const LOCK_TTL_MINUTES = Number(process.env.JOB_LOCK_TTL_MINUTES || 60);
 
-// Prevent multiple overlapping kicks in the same process
-let inFlight = false;
+/**
+ * Poll interval for workers (ms). Each worker process wakes up and tries to claim jobs.
+ */
+const POLL_INTERVAL_MS = Number(process.env.JOB_POLL_INTERVAL_MS || 1500);
 
-// If a kick arrives while inFlight=true, we remember it and run again after finishing
-let pendingKick = false;
+/**
+ * If you want one worker process to handle ONLY a specific resourceKey:
+ *   WORKER_RESOURCE_KEY=orders
+ * or leave empty to process all.
+ */
+const WORKER_RESOURCE_KEY = process.env.WORKER_RESOURCE_KEY || "";
+
+/**
+ * Internal flags to avoid overlapping loops in same process
+ */
+let inFlight = false;
 
 function getFileNameFromPath(p) {
   if (!p) return "";
@@ -24,21 +44,20 @@ function getFileNameFromPath(p) {
 }
 
 /**
- * Claim the next available queued job (ANY resourceKey).
- * This fixes: "job #2 stays queued forever" when second job has a different resourceKey.
+ * Claim the next available queued job atomically.
+ * - Picks queued jobs that are not locked OR whose lock is stale.
+ * - Optional filter by resourceKey (if WORKER_RESOURCE_KEY is set).
+ * - Sorts by createdAt so older jobs run first.
  *
- * Also fixes: lockedAt being undefined (not null) by including $exists:false.
+ * NOTE: Your schema should have timestamps: true so createdAt exists.
  */
 async function claimNextJob() {
   const staleBefore = new Date(Date.now() - LOCK_TTL_MINUTES * 60 * 1000);
 
   const filter = {
     status: "queued",
-    $or: [
-      { lockedAt: { $exists: false } },
-      { lockedAt: null },
-      { lockedAt: { $lt: staleBefore } },
-    ],
+    ...(WORKER_RESOURCE_KEY ? { resourceKey: WORKER_RESOURCE_KEY } : {}),
+    $or: [{ lockedAt: null }, { lockedAt: { $lt: staleBefore } }],
   };
 
   return ImportJobModel.findOneAndUpdate(
@@ -54,7 +73,7 @@ async function claimNextJob() {
     },
     {
       new: true,
-      sort: { createdAt: 1 }, // if you have timestamps; otherwise Mongo still returns something
+      sort: { createdAt: 1 },
     }
   );
 }
@@ -142,7 +161,6 @@ async function runJob(job) {
         break;
       }
       case "orders": {
-        // IMPORTANT: your migrateOrdersFromSheet must accept buffer (not req,res)
         const result = await migrateOrdersFromSheet(buffer);
         await markCompleted(jobId, result);
         break;
@@ -155,54 +173,72 @@ async function runJob(job) {
         );
         return;
     }
+
+    // Optional cleanup
+    // try { fs.unlinkSync(job.uploadedFilePath); } catch (_) {}
   } catch (err) {
     await markFailed(jobId, "Failed", err?.message || String(err));
   }
 }
 
-export async function kickProductsJobWorker() {
-  // If a kick arrives during an active run, remember it and exit.
-  if (inFlight) {
-    pendingKick = true;
-    return;
-  }
+/**
+ * Worker pool within ONE process:
+ * - Runs MAX_JOBS_PER_PROCESS jobs concurrently.
+ * - Each "slot" keeps claiming the next job until there are none.
+ */
+async function runWorkerPoolOnce() {
+  const slots = Array.from({ length: MAX_JOBS_PER_PROCESS }, async () => {
+    while (true) {
+      const job = await claimNextJob();
+      if (!job) break;
+      await runJob(job);
+    }
+  });
 
+  await Promise.allSettled(slots);
+}
+
+/**
+ * MAIN LOOP (for multi-process scaling)
+ * Call startImportJobWorker() once per node process.
+ * Run multiple processes (2–5) and they will safely share the queue.
+ */
+export async function startImportJobWorker() {
+  if (inFlight) return;
   inFlight = true;
 
+  console.log(
+    `🧵 Import worker started: WORKER_ID=${WORKER_ID} ` +
+      `MAX_JOBS_PER_PROCESS=${MAX_JOBS_PER_PROCESS} ` +
+      `WORKER_RESOURCE_KEY=${WORKER_RESOURCE_KEY || "ALL"} ` +
+      `POLL_INTERVAL_MS=${POLL_INTERVAL_MS}`
+  );
+
   try {
+    // eslint-disable-next-line no-constant-condition
     while (true) {
-      const jobs = [];
+      await runWorkerPoolOnce();
 
-      for (let i = 0; i < MAX_JOBS_PER_KICK; i++) {
-        const job = await claimNextJob();
-        if (!job) break;
-        jobs.push(job);
-      }
-
-      if (!jobs.length) break;
-
-      await Promise.allSettled(jobs.map((job) => runJob(job)));
-      // loop continues until no more queued jobs
+      // Sleep a bit before polling again
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     }
+  } catch (e) {
+    console.error("❌ Worker crashed:", e);
+    throw e;
   } finally {
     inFlight = false;
-
-    // If another kick happened while we were running, immediately run again
-    if (pendingKick) {
-      pendingKick = false;
-      setTimeout(() => {
-        kickProductsJobWorker().catch((e) =>
-          console.error("Worker kick error:", e)
-        );
-      }, 0);
-    }
   }
 }
 
+/**
+ * If you still want "kick" behavior from your upload endpoint:
+ * - It just starts the worker loop once in this process (if not already running).
+ * - In multi-process setup, you usually run workers separately and don't need kicks.
+ */
 export function kickResourceJobWorkerAsync() {
   setTimeout(() => {
-    kickProductsJobWorker().catch((e) =>
-      console.error("Worker kick error:", e)
+    startImportJobWorker().catch((e) =>
+      console.error("Worker start error:", e)
     );
   }, 0);
 }

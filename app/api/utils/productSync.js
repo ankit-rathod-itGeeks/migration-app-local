@@ -1,6 +1,5 @@
 import dotenv from "dotenv";
 dotenv.config();
-import XLSX from "xlsx";
 import { sanitizeMetafieldsForShopify } from "./utils.js";
 import fs from "fs";
 import path from "path";

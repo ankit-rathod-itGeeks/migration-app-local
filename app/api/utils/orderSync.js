@@ -1233,7 +1233,7 @@ function loadOrdersFromSheet(fileBuffer) {
   // Group rows by ID (order id)
   const groups = new Map();
   for (const row of rows) {
-    const id = row["Name"];
+    const id = row["ID"];
     if (!id) continue;
     if (!groups.has(id)) groups.set(id, []);
     groups.get(id).push(row);
@@ -1247,7 +1247,7 @@ function loadOrdersFromSheet(fileBuffer) {
     const first = groupRows[0];
 
     const email = first["Email"] || first["Customer: Email"] || null;
-    const customerEmail = first["Customer: Email"]
+    const customerEmail = first["Customer: Email"] 
 
     const createdAtRaw = first["Created At"] || null;
     const createdAt = normalizeDateTime(createdAtRaw);
