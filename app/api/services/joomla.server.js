@@ -1,11 +1,7 @@
 import XLSX from "xlsx";
 import mysql from "mysql2/promise";
 import ExcelJS from "exceljs";
-import fs from "fs";
-import path from "path";
-import { migrateProducts } from "../utils/productSync.js";
-import { ImportJobModel } from "../modals/job.modal.js"
-import { kickProductsJobWorkerAsync } from "../worker/worker.js"
+
 import { JoomlaConnectionModel } from "../modals/joomlaConnection.js";
 
 let pool;
@@ -118,94 +114,4 @@ export const exportResourceExcel = async (body) => {
     return { status: false, message: error?.message || "Export failed" };
   }
 };
-
-
-
-export const uploadProducts = async (file) => {
-  try {
-    const buffer = Buffer.from(await file.arrayBuffer());
-
-    const data = await migrateProducts(buffer);
-    return {
-      status: true,
-      message: "Products uploaded successfully",
-      data
-    }
-
-  } catch (error) {
-    console.log("Error in uploadProducts:", error);
-    return {
-      status: false,
-      message: error?.message || "Upload failed",
-    };
-  }
-};
-
-function ensureUploadsDir() {
-  const dir = path.join(process.cwd(), "uploads");
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
-
-function safeOriginalName(name) {
-  // keep it simple & safe for filesystem
-  const base = path.basename(String(name || "file.xlsx"));
-  return base.replace(/[^a-zA-Z0-9._-]/g, "_");
-}
-const ALLOWED_UPLOAD_TYPES = [".xlsx", ".xls", ".csv"];
-export const uploadResourceJob = async (resourceKey, file) => {
-  // const allowed = new Set(["products"]);
-  // if (!allowed.has(resourceKey)) {
-  //     return { status: false, message: "Unsupported resourceKey" };
-  // }
-
-  if (!(file instanceof File)) {
-    return { status: false, message: "File is required" };
-  }
-
-  const originalName = safeOriginalName(file.name);
-  const lower = originalName.toLowerCase();
-
-  if (!ALLOWED_UPLOAD_TYPES.some((ext) => lower.endsWith(ext))) {
-    return { status: false, message: "Only .xlsx/.xls/.csv allowed" };
-  }
-
-  const uploadsDir = ensureUploadsDir();
-
-  // ✅ create a unique filename BEFORE creating the DB record
-  // because uploadedFilePath is required in schema
-  const uniquePart = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  const fileNameOnDisk = `${uniquePart}_${originalName}`;
-  const filePath = path.join(uploadsDir, fileNameOnDisk);
-
-  // ✅ save file first
-  const arrayBuffer = await file.arrayBuffer();
-  fs.writeFileSync(filePath, Buffer.from(arrayBuffer));
-
-  // ✅ now create job with valid uploadedFilePath
-  const job = await ImportJobModel.create({
-    resourceKey: resourceKey,
-    originalFileName: originalName,
-    uploadedFilePath: filePath,
-    status: "queued",
-    progress: { total: 0, processed: 0, success: 0, failed: 0 },
-    message: "File uploaded",
-    lockedAt: null,
-    lockedBy: null,
-  });
-
-  kickProductsJobWorkerAsync(resourceKey, file ,job);
-
-  return {
-    status: true,
-    message: "Job created",
-    data: {
-      jobId: String(job._id),
-      requestResourceKey: resourceKey,
-      storedResourceKey: "products",
-      originalFileName: originalName,
-    },
-  };
-};
-
 

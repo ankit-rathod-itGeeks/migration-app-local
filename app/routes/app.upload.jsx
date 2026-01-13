@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import JobsListTable from "./components/JobsListTable"; // ✅ adjust path if needed
+import JobProgressBar from "./components/JobProgressBar";
+
 
 export default function Upload() {
   const [resourceKey, setResourceKey] = useState("products");
@@ -26,6 +28,22 @@ export default function Upload() {
   const [jobsLoading, setJobsLoading] = useState(false);
   const [jobsError, setJobsError] = useState("");
 
+  useEffect(() => {
+    if (!jobId) return;
+
+    stopPolling();       // safety: clear old timer
+    pollJob(jobId);      // start polling automatically
+
+    return () => stopPolling();
+  }, [jobId]);
+
+  useEffect(() => {
+    // resource changed → hard reset everything job-related
+    stopPolling();
+    setJobId("");
+    setJobInfo(null);
+  }, [resourceKey]);
+
   function extractFirstFile(event) {
     const d = event?.detail;
 
@@ -50,11 +68,13 @@ export default function Upload() {
   }
 
   async function pollJob(nextJobId) {
+    console.log("⏳ Polling job status...");
     const id = nextJobId || jobId;
+    console.log("Job ID:", id);
     if (!id) return;
 
     try {
-      const res = await fetch(`/api/upload?jobId=${encodeURIComponent(id)}`, {
+      const res = await fetch(`/api/upload/status?jobId=${encodeURIComponent(id)}`, {
         method: "GET",
       });
 
@@ -101,7 +121,7 @@ export default function Upload() {
       }
 
       // queued/running → continue polling
-      // pollTimerRef.current = setTimeout(() => pollJob(id), 3000);
+      pollTimerRef.current = setTimeout(() => pollJob(id), 1000);
     } catch (e) {
       console.error(e);
       setStatus("Polling failed due to a network/server error.");
@@ -114,7 +134,7 @@ export default function Upload() {
       setJobsLoading(true);
       setJobsError("");
 
-      const res = await fetch(`/api/upload?resourceKey=${resourceKey}`, {
+      const res = await fetch(`/api/upload/list?resourceKey=${resourceKey}`, {
         method: "GET",
       });
       const json = await res.json().catch(() => null);
@@ -138,7 +158,7 @@ export default function Upload() {
     if (!oneJobId) return;
 
     try {
-      const res = await fetch(`/api/upload?jobId=${encodeURIComponent(oneJobId)}`, {
+      const res = await fetch(`/api/upload/resource?jobId=${encodeURIComponent(oneJobId)}`, {
         method: "GET",
       });
 
@@ -259,31 +279,31 @@ export default function Upload() {
       }
 
       // ✅ products: expect jobId and start polling
-      if (resourceKey === "products") {
-        const createdJobId =
-          json?.result?.data?.jobId || // if you wrap in sendResponse with data
-          json?.result?.jobId || // if you return directly
-          "";
+      // if (resourceKey === "products") {
+      const createdJobId =
+        json?.result?.data?.jobId || // if you wrap in sendResponse with data
+        json?.result?.jobId || // if you return directly
+        "";
 
-        if (!createdJobId) {
-          setStatus("Job created response is missing jobId");
-          return;
-        }
-
-        setJobId(createdJobId);
-        setStatus(`Job created: ${createdJobId}`);
-
-        // clear selected file + reset drop-zone UI (job already saved on server)
-        setFile(null);
-        setDropKey((k) => k + 1);
-
-        // refresh list
-        fetchJobsList();
-
-        // start polling
-        pollJob(createdJobId);
+      if (!createdJobId) {
+        setStatus("Job created response is missing jobId");
         return;
       }
+
+      setJobId(createdJobId);
+      setStatus(`Job created: ${createdJobId}`);
+
+      // clear selected file + reset drop-zone UI (job already saved on server)
+      setFile(null);
+      setDropKey((k) => k + 1);
+
+      // refresh list
+      fetchJobsList();
+
+      // start polling
+      pollJob(createdJobId);
+      // return;
+      // }
 
       // ✅ current working flow (products/orders/customers) stays same:
       setStatus(json?.message || "Uploaded successfully.");
@@ -318,15 +338,14 @@ export default function Upload() {
 
   // load list when products is selected
   useEffect(() => {
-    if (resourceKey === "products") {
-      fetchJobsList();
-    }
+    fetchJobsList();
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resourceKey]);
 
   return (
     <s-page heading="Fetch Resources">
-      <s-stack gap="500">
+      <s-stack gap="small">
         {/* Resource selector */}
         <s-select
           label="Resource"
@@ -358,7 +377,7 @@ export default function Upload() {
         ) : null}
 
         {/* Actions */}
-        <s-stack gap="300" direction="horizontal">
+        <s-stack gap="base" direction="inline">
           <s-button
             variant="primary"
             disabled={!canUpload}
@@ -372,128 +391,52 @@ export default function Upload() {
             Clear
           </s-button>
 
-          {/* Optional manual refresh while job is running */}
-          {resourceKey === "products" && jobId ? (
-            <s-button
-              variant="secondary"
-              disabled={isUploading}
-              onClick={() => pollJob(jobId)}
-            >
-              Refresh job status
-            </s-button>
-          ) : null}
         </s-stack>
 
         {status ? <s-text>{status}</s-text> : null}
-
-        {/* ✅ Job status section (ONLY for products) */}
-        {resourceKey === "products" && (jobId || jobInfo) ? (
-          <s-card>
-            <s-stack gap="300">
-              <s-text variant="headingMd">Job Status</s-text>
-
-              <s-stack gap="200">
-                {jobId ? (
-                  <s-text>
-                    <strong>Job ID:</strong> {jobId}
-                  </s-text>
-                ) : null}
-
-                {jobInfo ? (
-                  <>
-                    <s-text>
-                      <strong>Status:</strong> {jobInfo.status}
-                    </s-text>
-
-                    {jobInfo.error ? (
-                      <s-banner status="critical">
-                        <div>
-                          <strong>Error:</strong> {jobInfo.error}
-                        </div>
-                      </s-banner>
-                    ) : null}
-                  </>
-                ) : (
-                  <s-text>Fetching job status…</s-text>
-                )}
-              </s-stack>
-
-              {/* Download button when job finished */}
-              {downloadUrl ? (
-                <s-banner status="success">
-                  <div>
-                    <strong>Report:</strong>{" "}
-                    {downloadUrl}
-                  </div>
-                </s-banner>
-              ) : null}
-            </s-stack>
-          </s-card>
+        {jobInfo && jobInfo.resourceKey === resourceKey ? (
+          <JobProgressBar job={jobInfo} />
         ) : null}
 
-        {/* ✅ Jobs list table component (ONLY for products) */}
-        {resourceKey === "products" ? (
-          <JobsListTable
-            jobsList={jobsList}
-            jobsLoading={jobsLoading}
-            jobsError={jobsError}
-            isUploading={isUploading}
-            onRefreshList={fetchJobsList}
-            onRefreshJob={refreshOneJobFromList}
-            onViewJob={(job) => {
-              const id = String(job._id || job.jobId || "");
-              setJobId(id);
-              setJobInfo(job);
-              setStatus(job.message || `Selected job: ${id}`);
+        <s-card>
+          <s-stack gap="300">
 
-              if (job.status === "completed" && job.reportPath) {
-                setDownloadUrl(job.reportPath);
-              } else {
-                setDownloadUrl("");
-              }
-            }}
-            onDownloadReport={(job) => {
-              if (job?.reportPath) {
-                window.open(job.reportPath, "_blank");
-                return;
-              }
 
-              // fallback by name if your backend uses /api/download-report?name=
-              const name = job?.reportFileName || getFileNameFromPath(job?.reportPath);
-              if (name) {
-                window.open(`/api/download-report?name=${encodeURIComponent(name)}`, "_blank");
-              }
-            }}
-          />
-        ) : null}
+          </s-stack>
+        </s-card>
 
-        {/* ✅ Existing report section (shows only after normal upload) */}
-        {reportInfo ? (
-          <s-card>
-            <s-stack gap="300">
-              <s-text variant="headingMd">Upload Report</s-text>
 
-              <s-stack gap="200">
-                <s-text>
-                  <strong>Total processed:</strong> {reportInfo.totalProcessed}
-                </s-text>
-                <s-text>
-                  <strong>Report rows:</strong> {reportInfo.reportCount}
-                </s-text>
-                <s-text>
-                  <strong>Success:</strong> {reportInfo.successCount}
-                </s-text>
-                <s-text>
-                  <strong>Failed:</strong> {reportInfo.failedCount}
-                </s-text>
-                <s-text>
-                  <strong>Report file:</strong>{" "}
-                  <s-link>{reportInfo.reportPath}</s-link>
-                </s-text>
-              </s-stack>
-            </s-stack>
-          </s-card>
-        ) : null}
+        <JobsListTable
+          jobsList={jobsList}
+          jobsLoading={jobsLoading}
+          jobsError={jobsError}
+          isUploading={isUploading}
+          renderProgress={(job) => <JobProgressBar job={job} />}
+          onRefreshList={fetchJobsList}
+          onRefreshJob={refreshOneJobFromList}
+          onViewJob={(job) => {
+            const id = String(job._id || job.jobId || "");
+            setJobId(id);
+            setJobInfo(job);
+            setStatus(job.message || `Selected job: ${id}`);
+
+            if (job.status === "completed" && job.reportPath) {
+              setDownloadUrl(job.reportPath);
+            } else {
+              setDownloadUrl("");
+            }
+          }}
+          onDownloadReport={(job) => {
+            const jobId = String(job?._id || job?.jobId || "");
+            if (!jobId) return;
+
+            window.open(
+              `/api/upload/download?jobId=${encodeURIComponent(jobId)}`,
+              "_blank"
+            );
+          }}
+        />
+
       </s-stack>
     </s-page>
   );

@@ -9,14 +9,13 @@ export default function JobsListTable(props) {
     onRefreshList,
     onRefreshJob,
     onViewJob,
+    renderProgress,
   } = props;
 
   return (
     <s-card>
       <s-stack gap="300">
         <s-stack gap="200" direction="horizontal">
-          <s-text variant="headingMd">All Jobs</s-text>
-
           <s-button
             variant="secondary"
             disabled={jobsLoading || isUploading}
@@ -41,11 +40,12 @@ export default function JobsListTable(props) {
                 <s-table-header>Job ID</s-table-header>
                 <s-table-header>File</s-table-header>
                 <s-table-header>Status</s-table-header>
+                <s-table-header>Progress</s-table-header> {/* ✅ */}
                 <s-table-header format="numeric">Processed</s-table-header>
                 <s-table-header format="numeric">Success</s-table-header>
                 <s-table-header format="numeric">Failed</s-table-header>
                 <s-table-header>Message</s-table-header>
-                <s-table-header>Report Path</s-table-header>
+                <s-table-header>Download</s-table-header> {/* ✅ NEW */}
               </s-table-header-row>
 
               <s-table-body>
@@ -66,14 +66,26 @@ export default function JobsListTable(props) {
                       <s-table-cell>{id}</s-table-cell>
                       <s-table-cell>{fileName}</s-table-cell>
                       <s-table-cell>{statusVal}</s-table-cell>
+                      <s-table-cell>
+                        {renderProgress ? renderProgress(j) : "—"}
+                      </s-table-cell>
                       <s-table-cell>{`${processed}/${total}`}</s-table-cell>
                       <s-table-cell>{success}</s-table-cell>
                       <s-table-cell>{failed}</s-table-cell>
                       <s-table-cell>{msg}</s-table-cell>
 
-                      {/* ✅ NEW: Report path column */}
                       <s-table-cell>
-                        {j.reportPath ? j.reportPath : "—"}
+                        {j.reportPath ? (
+                          <s-button
+                            size="slim"
+                            variant="secondary"
+                            onClick={() => props.onDownloadReport?.(j)}
+                          >
+                            Download
+                          </s-button>
+                        ) : (
+                          "—"
+                        )}
                       </s-table-cell>
                     </s-table-row>
                   );
