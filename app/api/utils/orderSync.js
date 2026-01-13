@@ -2688,7 +2688,7 @@ export async function migrateOrdersFromSheet(fileBuffer) {
     }
 
     // WRITE REPORT (ADDED)
-    const reportDir = process.env.REPORT_DIR || path.join(__dirname, "reports");
+    const reportDir =  path.join(__dirname, "../../../reports");
     const reportPath = writeOrdersReportXlsx({
       reportRows,
       reportDir,
