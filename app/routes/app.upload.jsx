@@ -16,12 +16,12 @@ export default function Upload() {
   const [reportInfo, setReportInfo] = useState(null);
   const [downloadUrl, setDownloadUrl] = useState("");
 
-  // ✅ job/polling state (only for products_job)
+  // ✅ job/polling state (only for products)
   const [jobId, setJobId] = useState("");
   const [jobInfo, setJobInfo] = useState(null);
   const pollTimerRef = useRef(null);
 
-  // ✅ job list state (only for products_job)
+  // ✅ job list state (only for products)
   const [jobsList, setJobsList] = useState([]);
   const [jobsLoading, setJobsLoading] = useState(false);
   const [jobsError, setJobsError] = useState("");
@@ -114,7 +114,7 @@ export default function Upload() {
       setJobsLoading(true);
       setJobsError("");
 
-      const res = await fetch(`/api/upload?resourceKey=products_job`, {
+      const res = await fetch(`/api/upload?resourceKey=${resourceKey}`, {
         method: "GET",
       });
       const json = await res.json().catch(() => null);
@@ -258,8 +258,8 @@ export default function Upload() {
         return;
       }
 
-      // ✅ products_job: expect jobId and start polling
-      if (resourceKey === "products_job") {
+      // ✅ products: expect jobId and start polling
+      if (resourceKey === "products") {
         const createdJobId =
           json?.result?.data?.jobId || // if you wrap in sendResponse with data
           json?.result?.jobId || // if you return directly
@@ -316,9 +316,9 @@ export default function Upload() {
     return () => stopPolling();
   }, []);
 
-  // load list when products_job is selected
+  // load list when products is selected
   useEffect(() => {
-    if (resourceKey === "products_job") {
+    if (resourceKey === "products") {
       fetchJobsList();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -335,7 +335,6 @@ export default function Upload() {
           onChange={handleResourceChange}
         >
           <s-option value="products">Products</s-option>
-          <s-option value="products_job">Products (Job)</s-option>
           <s-option value="orders">Orders</s-option>
           <s-option value="customers">Customers</s-option>
         </s-select>
@@ -374,7 +373,7 @@ export default function Upload() {
           </s-button>
 
           {/* Optional manual refresh while job is running */}
-          {resourceKey === "products_job" && jobId ? (
+          {resourceKey === "products" && jobId ? (
             <s-button
               variant="secondary"
               disabled={isUploading}
@@ -387,8 +386,8 @@ export default function Upload() {
 
         {status ? <s-text>{status}</s-text> : null}
 
-        {/* ✅ Job status section (ONLY for products_job) */}
-        {resourceKey === "products_job" && (jobId || jobInfo) ? (
+        {/* ✅ Job status section (ONLY for products) */}
+        {resourceKey === "products" && (jobId || jobInfo) ? (
           <s-card>
             <s-stack gap="300">
               <s-text variant="headingMd">Job Status</s-text>
@@ -424,7 +423,7 @@ export default function Upload() {
                 <s-banner status="success">
                   <div>
                     <strong>Report:</strong>{" "}
-                  {downloadUrl}
+                    {downloadUrl}
                   </div>
                 </s-banner>
               ) : null}
@@ -432,8 +431,8 @@ export default function Upload() {
           </s-card>
         ) : null}
 
-        {/* ✅ Jobs list table component (ONLY for products_job) */}
-        {resourceKey === "products_job" ? (
+        {/* ✅ Jobs list table component (ONLY for products) */}
+        {resourceKey === "products" ? (
           <JobsListTable
             jobsList={jobsList}
             jobsLoading={jobsLoading}

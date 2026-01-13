@@ -17,7 +17,7 @@ const ImportJobSchema = new mongoose.Schema(
     resourceKey: {
       type: String,
       required: true,
-      enum: ["products", "orders", "customers", "products_job"],
+      enum: ["products", "orders", "customers", "products"],
       index: true,
     },
 

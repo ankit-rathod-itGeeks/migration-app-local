@@ -11,34 +11,34 @@ import { JoomlaConnectionModel } from "../modals/joomlaConnection.js";
 let pool;
 
 function getJoomlaPool(storeConnection) {
-    if (!pool) {
-        pool = mysql.createPool({
-            host: process.env.JOOMLA_DB_HOST,
-            user: process.env.JOOMLA_DB_USER,
-            //   password: process.env.JOOMLA_DB_PASSWORD, // enable if needed
-            database: process.env.JOOMLA_DB_NAME,
-            waitForConnections: true,
-            connectionLimit: 5,
-            queueLimit: 0,
-            multipleStatements: true,
-        });
-    }
-    return pool;
+  if (!pool) {
+    pool = mysql.createPool({
+      host: process.env.JOOMLA_DB_HOST,
+      user: process.env.JOOMLA_DB_USER,
+      //   password: process.env.JOOMLA_DB_PASSWORD, // enable if needed
+      database: process.env.JOOMLA_DB_NAME,
+      waitForConnections: true,
+      connectionLimit: 5,
+      queueLimit: 0,
+      multipleStatements: true,
+    });
+  }
+  return pool;
 }
 
 // Allow SELECT or WITH; block writes.
 function validateReadOnlySelect(sql) {
-    const q = String(sql || "").trim();
-    if (!q) return { ok: false, message: "Missing query" };
+  const q = String(sql || "").trim();
+  if (!q) return { ok: false, message: "Missing query" };
 
-    const startsOk = /^select\s/i.test(q) || /^with\s/i.test(q);
-    if (!startsOk) return { ok: false, message: "Only SELECT/WITH queries are allowed" };
+  const startsOk = /^select\s/i.test(q) || /^with\s/i.test(q);
+  if (!startsOk) return { ok: false, message: "Only SELECT/WITH queries are allowed" };
 
-    const blocked =
-        /\b(insert|update|delete|drop|alter|truncate|grant|revoke|call|load_file|into\s+outfile|shutdown)\b/i;
-    if (blocked.test(q)) return { ok: false, message: "Query contains blocked keywords" };
+  const blocked =
+    /\b(insert|update|delete|drop|alter|truncate|grant|revoke|call|load_file|into\s+outfile|shutdown)\b/i;
+  if (blocked.test(q)) return { ok: false, message: "Query contains blocked keywords" };
 
-    return { ok: true, query: q };
+  return { ok: true, query: q };
 }
 
 export const exportResourceExcel = async (body) => {
@@ -122,90 +122,90 @@ export const exportResourceExcel = async (body) => {
 
 
 export const uploadProducts = async (file) => {
-    try {
-        const buffer = Buffer.from(await file.arrayBuffer());
+  try {
+    const buffer = Buffer.from(await file.arrayBuffer());
 
-        const data = await migrateProducts(buffer);
-        return {
-            status: true,
-            message: "Products uploaded successfully",
-            data
-        }
-
-    } catch (error) {
-        console.log("Error in uploadProducts:", error);
-        return {
-            status: false,
-            message: error?.message || "Upload failed",
-        };
+    const data = await migrateProducts(buffer);
+    return {
+      status: true,
+      message: "Products uploaded successfully",
+      data
     }
+
+  } catch (error) {
+    console.log("Error in uploadProducts:", error);
+    return {
+      status: false,
+      message: error?.message || "Upload failed",
+    };
+  }
 };
 
 function ensureUploadsDir() {
-    const dir = path.join(process.cwd(), "uploads");
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    return dir;
+  const dir = path.join(process.cwd(), "uploads");
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 function safeOriginalName(name) {
-    // keep it simple & safe for filesystem
-    const base = path.basename(String(name || "file.xlsx"));
-    return base.replace(/[^a-zA-Z0-9._-]/g, "_");
+  // keep it simple & safe for filesystem
+  const base = path.basename(String(name || "file.xlsx"));
+  return base.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 const ALLOWED_UPLOAD_TYPES = [".xlsx", ".xls", ".csv"];
-export const uploadProductsJob = async (resourceKey, file) => {
-    const allowed = new Set(["products_job"]);
-    if (!allowed.has(resourceKey)) {
-        return { status: false, message: "Unsupported resourceKey" };
-    }
+export const uploadResourceJob = async (resourceKey, file) => {
+  // const allowed = new Set(["products"]);
+  // if (!allowed.has(resourceKey)) {
+  //     return { status: false, message: "Unsupported resourceKey" };
+  // }
 
-    if (!(file instanceof File)) {
-        return { status: false, message: "File is required" };
-    }
+  if (!(file instanceof File)) {
+    return { status: false, message: "File is required" };
+  }
 
-    const originalName = safeOriginalName(file.name);
-    const lower = originalName.toLowerCase();
+  const originalName = safeOriginalName(file.name);
+  const lower = originalName.toLowerCase();
 
-    if (!ALLOWED_UPLOAD_TYPES.some((ext) => lower.endsWith(ext))) {
-        return { status: false, message: "Only .xlsx/.xls/.csv allowed" };
-    }
+  if (!ALLOWED_UPLOAD_TYPES.some((ext) => lower.endsWith(ext))) {
+    return { status: false, message: "Only .xlsx/.xls/.csv allowed" };
+  }
 
-    const uploadsDir = ensureUploadsDir();
+  const uploadsDir = ensureUploadsDir();
 
-    // ✅ create a unique filename BEFORE creating the DB record
-    // because uploadedFilePath is required in schema
-    const uniquePart = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    const fileNameOnDisk = `${uniquePart}_${originalName}`;
-    const filePath = path.join(uploadsDir, fileNameOnDisk);
+  // ✅ create a unique filename BEFORE creating the DB record
+  // because uploadedFilePath is required in schema
+  const uniquePart = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const fileNameOnDisk = `${uniquePart}_${originalName}`;
+  const filePath = path.join(uploadsDir, fileNameOnDisk);
 
-    // ✅ save file first
-    const arrayBuffer = await file.arrayBuffer();
-    fs.writeFileSync(filePath, Buffer.from(arrayBuffer));
+  // ✅ save file first
+  const arrayBuffer = await file.arrayBuffer();
+  fs.writeFileSync(filePath, Buffer.from(arrayBuffer));
 
-    // ✅ now create job with valid uploadedFilePath
-    const job = await ImportJobModel.create({
-        resourceKey: "products_job",
-        originalFileName: originalName,
-        uploadedFilePath: filePath, // ✅ non-empty
-        status: "queued",
-        progress: { total: 0, processed: 0, success: 0, failed: 0 },
-        message: "File uploaded",
-        lockedAt: null,
-        lockedBy: null,
-    });
+  // ✅ now create job with valid uploadedFilePath
+  const job = await ImportJobModel.create({
+    resourceKey: resourceKey,
+    originalFileName: originalName,
+    uploadedFilePath: filePath,
+    status: "queued",
+    progress: { total: 0, processed: 0, success: 0, failed: 0 },
+    message: "File uploaded",
+    lockedAt: null,
+    lockedBy: null,
+  });
 
-    kickProductsJobWorkerAsync();
+  kickProductsJobWorkerAsync(resourceKey, file ,job);
 
-    return {
-        status: true,
-        message: "Job created",
-        data: {
-            jobId: String(job._id),
-            requestResourceKey: resourceKey,
-            storedResourceKey: "products_job",
-            originalFileName: originalName,
-        },
-    };
+  return {
+    status: true,
+    message: "Job created",
+    data: {
+      jobId: String(job._id),
+      requestResourceKey: resourceKey,
+      storedResourceKey: "products",
+      originalFileName: originalName,
+    },
+  };
 };
 
 
