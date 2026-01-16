@@ -5,8 +5,10 @@ const QuerySchema = new mongoose.Schema(
     resourceKey: {
       type: String,
       required: true,
-      index: true,
-      unique: true,
+    },
+    extensionKey: {
+      type: String,
+      required: true,
     },
     query: { type: String, required: true },
   },

@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from "react";
 export default function ResourceExportModal(props) {
   const {
     modalId = "resource-export-modal",
+    extensionKey = "",
     id = "",
     resourceKey = "",
     onClose,
@@ -48,7 +49,7 @@ export default function ResourceExportModal(props) {
         setDbLoading(true);
 
         const res = await fetch(
-          `/api/connect/query?resourceKey=${encodeURIComponent(resourceKey)}`,
+          `/api/connect/query?resourceKey=${encodeURIComponent(resourceKey)}&extensionKey=${encodeURIComponent(extensionKey)}`,
           { method: "GET" }
         );
 

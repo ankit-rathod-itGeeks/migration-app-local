@@ -19,7 +19,8 @@ export const loader = async ({ request, params }) => {
     case "query": {
       try {
         const resourceKey = url.searchParams.get("resourceKey");
-        const data = await getResourceQuery(resourceKey);
+        const extensionKey = url.searchParams.get("extensionKey");
+        const data = await getResourceQuery(resourceKey,extensionKey);
         return sendResponse(200, true, "query  loaded", data);
       } catch (error) {
         console.error(error);

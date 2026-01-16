@@ -11,6 +11,7 @@ export default function ResourcesPage() {
 
     const [query, setQuery] = useState("");
     const [selectedResourceKey, setSelectedResourceKey] = useState("");
+    const [extension, setExtension] = useState("j2store");
     const [loadingResourceKey, setLoadingResourceKey] = useState("");
 
     const resources = useMemo(
@@ -43,6 +44,13 @@ export default function ResourcesPage() {
         []
     );
 
+    const joomlaExtensions = [{
+        name: "J2 Store",
+        key: "j2store",
+    }, {
+        name: "Hika Show",
+        key: "hikashow",
+    }]
     const filtered = useMemo(() => {
         const q = String(query || "").trim().toLowerCase();
         if (!q) return resources;
@@ -69,13 +77,25 @@ export default function ResourcesPage() {
     function handleResourceQueryLoaded() {
         setLoadingResourceKey("");
     }
+    function handleExtensionChange(key) {
+        console.log(key);
+        setExtension(key);
+    }
 
     return (
         <s-page heading="Data Categories">
             <s-button slot="primary-action" variant="primary">Action</s-button>
             <s-button slot="secondary-action" variant="auto" icon="arrow-left" onClick={() => navigate(-1)}>Back</s-button>
+            <s-stack alignItems="end" justifyContent="end" paddingBlockEnd="base">
+                <s-button commandFor="extensions-menu">{extension ? extension : "Select Joomla Extension"}</s-button>
+                <s-menu id="extensions-menu" accessibilityLabel="extensions menu">
+                    {joomlaExtensions.map((extension) => (
+                        <s-button key={extension.key} onClick={() => handleExtensionChange(extension.key)}>{extension.name}</s-button>
+                    ))}
+                </s-menu>
+            </s-stack>
             <s-section padding="base">
-                <s-stack gap="base">
+                <s-stack gap="base" direction="">
                     {!id ? (
                         <s-banner status="critical">
                             <div>
@@ -85,6 +105,8 @@ export default function ResourcesPage() {
                         </s-banner>
                     ) : null}
 
+
+
                     <s-text-field
                         value={query}
                         onChange={onChangeQuery}
@@ -92,6 +114,7 @@ export default function ResourcesPage() {
                         clearButton
                         onClearButtonClick={() => onChangeQuery({ target: { value: "" } })}
                     />
+
 
                     <s-stack gap="base">
                         {filtered.map((r) => (
@@ -105,7 +128,7 @@ export default function ResourcesPage() {
                                         </s-badge>
                                         <s-stack direction="block" >
                                             <s-text variant="headingSm">{r.title}</s-text>
-                                        <s-text tone="subdued">{r.description}</s-text>
+                                            <s-text tone="subdued">{r.description}</s-text>
                                         </s-stack>
 
                                     </s-stack>
@@ -138,6 +161,7 @@ export default function ResourcesPage() {
             <ResourceExportModal
                 modalId={MODAL_ID}
                 id={id}
+                extensionKey={extension}
                 resourceKey={selectedResourceKey}
                 onQueryLoaded={handleResourceQueryLoaded}
                 onSuccess={() => {

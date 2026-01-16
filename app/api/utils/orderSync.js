@@ -1247,7 +1247,7 @@ function loadOrdersFromSheet(fileBuffer) {
     const first = groupRows[0];
 
     const email = first["Email"] || first["Customer: Email"] || null;
-    const customerEmail = first["Customer: Email"] 
+    const customerEmail = first["Customer: Email"]
 
     const createdAtRaw = first["Created At"] || null;
     const createdAt = normalizeDateTime(createdAtRaw);
@@ -1895,110 +1895,129 @@ async function migrateParsedOrder(parsedOrder,
   const missingProducts = [];
 
   for (const li of parsedOrder.lineItems) {
-    const productHandle = li.productHandle;
-    const sourceSku = li.sku || null;
-    const sourceVariantTitle = li.variantTitle || null;
+  const productHandle = li.productHandle;
+  const sourceSku = li.sku || null;
+  const sourceVariantTitle = li.variantTitle || null;
 
-    if (!productHandle) {
-      console.warn(`   ⚠️  Missing product handle for line "${li.title}"`);
-      missingProducts.push(li.title || "UNKNOWN");
-      continue;
-    }
+  if (!productHandle) {
+    console.warn(`   ⚠️  Missing product handle for line "${li.title}"`);
+    missingProducts.push(li.title || "UNKNOWN");
+    continue;
+  }
 
-    const targetProduct = await checkProductExists(productHandle, productsCache);
-    if (!targetProduct) {
-      console.warn(`   ⚠️  Product not found in target: ${productHandle}`);
-      missingProducts.push(productHandle);
-      continue;
-    }
+  const targetProduct = await checkProductExists(productHandle, productsCache);
 
-    // Match variant: SKU → title/displayName → fallback first
-    let targetVariantId = null;
-    let matchMethod = null;
+  const unitPrice = li.price || 0;
 
-    if (sourceSku) {
-      const match = targetProduct.variants.nodes.find(
-        (v) => v.sku === sourceSku,
-      );
-      if (match) {
-        targetVariantId = match.id;
-        matchMethod = "SKU";
-      }
-    }
+  let requiresShipping = li.requiresShipping;
+  if (requiresShipping === null || requiresShipping === undefined) requiresShipping = true;
 
-    if (!targetVariantId && sourceVariantTitle) {
-      const match = targetProduct.variants.nodes.find(
-        (v) =>
-          v.title === sourceVariantTitle ||
-          v.displayName === sourceVariantTitle,
-      );
-      if (match) {
-        targetVariantId = match.id;
-        matchMethod = "Title";
-      }
-    }
+  let taxable = li.taxable;
+  if (taxable === null || taxable === undefined) taxable = true;
 
-    if (!targetVariantId && targetProduct.variants.nodes.length > 0) {
-      targetVariantId = targetProduct.variants.nodes[0].id;
-      matchMethod = "Fallback";
-      console.warn(
-        `   ⚠️  Using first variant for product handle=${productHandle}`,
-      );
-    }
+  // ✅ If handle not found in target store → create unlinked (custom/static) line item
+  if (!targetProduct) {
+    console.warn(`   ⚠️  Product not found in target: ${productHandle} → creating UNLINKED line item`);
 
-    if (!targetVariantId) {
-      console.warn(
-        `   ⚠️  No variant matched for product handle=${productHandle}`,
-      );
-      missingProducts.push(productHandle);
-      continue;
-    }
-
-    const unitPrice = li.price || 0;
-
-    let requiresShipping = li.requiresShipping;
-    if (requiresShipping === null || requiresShipping === undefined) {
-      requiresShipping = true; // default if missing
-    }
-
-    let taxable = li.taxable;
-    if (taxable === null || taxable === undefined) {
-      taxable = true; // default if missing
-    }
-
-    const lineInput = {
-      variantId: targetVariantId,
+    const staticLineInput = {
+      title: li.title || productHandle || "Custom item",
+      variantTitle: li.variantTitle || undefined,
+      sku: li.sku || undefined,
       quantity: li.quantity || 0,
       priceSet: {
         shopMoney: {
           amount: unitPrice,
           currencyCode: parsedOrder.currency,
         },
+      },
+      requiresShipping,
+      taxable,
+    };
+
+    lineItemsInput.push(staticLineInput);
+
+    console.log(
+      `   ✅ [UNLINKED] ${staticLineInput.title} x${staticLineInput.quantity} @ ${unitPrice} ${parsedOrder.currency}`
+    );
+
+    continue;
+  }
+
+  // Match variant: SKU → title/displayName → fallback first
+  let targetVariantId = null;
+  let matchMethod = null;
+
+  if (sourceSku) {
+      const match = targetProduct.variants.nodes.find(
+        (v) => v.sku === sourceSku,
+      );
+    if (match) {
+      targetVariantId = match.id;
+      matchMethod = "SKU";
+    }
+  }
+
+  if (!targetVariantId && sourceVariantTitle) {
+    const match = targetProduct.variants.nodes.find(
+        (v) =>
+          v.title === sourceVariantTitle ||
+          v.displayName === sourceVariantTitle,
+    );
+    if (match) {
+      targetVariantId = match.id;
+      matchMethod = "Title";
+    }
+  }
+
+  if (!targetVariantId && targetProduct.variants.nodes.length > 0) {
+    targetVariantId = targetProduct.variants.nodes[0].id;
+    matchMethod = "Fallback";
+      console.warn(
+        `   ⚠️  Using first variant for product handle=${productHandle}`,
+      );
+  }
+
+  if (!targetVariantId) {
+      console.warn(
+        `   ⚠️  No variant matched for product handle=${productHandle}`,
+      );
+    missingProducts.push(productHandle);
+    continue;
+  }
+
+  // ✅ DO NOT redeclare unitPrice/requiresShipping/taxable here (reuse existing ones)
+
+  const lineInput = {
+    variantId: targetVariantId,
+    quantity: li.quantity || 0,
+    priceSet: {
+      shopMoney: {
+        amount: unitPrice,
+        currencyCode: parsedOrder.currency,
+      },
         // presentmentMoney: {
         //   amount: unitPrice,
         //   currencyCode: parsedOrder.presentmentCurrency,
         // },
-      },
-      requiresShipping,
-      taxable,
+    },
+    requiresShipping,
+    taxable,
 
-    };
+  };
 
     // if (li.taxLines && li.taxLines.length > 0) {
     //   lineInput.taxLines = li.taxLines;
     // }
 
-    lineItemsInput.push(lineInput);
-    console.log(
+  lineItemsInput.push(lineInput);
+  console.log(
       `   ✅ [${matchMethod}] ${li.title} x${li.quantity} @ ${unitPrice} ${parsedOrder.currency} (requiresShipping=${requiresShipping}, taxable=${taxable})`,
-    );
-  }
+  );
+}
+
 
   if (missingProducts.length > 0) {
-    console.error(
-      `   ❌ Missing products or variants: ${missingProducts.join(", ")}`,
-    );
-    return { success: false, reason: "products_missing", missing: missingProducts };
+    console.warn(`   ⚠️ Some items could not be linked and were created as unlinked items: ${missingProducts.join(", ")}`);
   }
 
   if (lineItemsInput.length === 0) {
@@ -2092,7 +2111,7 @@ async function migrateParsedOrder(parsedOrder,
 
   // 4. Create order
   try {
-    console.log("   📝 orderInput...", JSON.stringify(orderInput, null, 2));
+    // console.log("   📝 orderInput...", JSON.stringify(orderInput, null, 2));
     console.log("   📝 Creating order via orderCreate...");
     // orderInput.companyLocationId = "gid://shopify/CompanyLocation/3726311723";
 
@@ -2688,7 +2707,7 @@ export async function migrateOrdersFromSheet(fileBuffer) {
     }
 
     // WRITE REPORT (ADDED)
-    const reportDir =  path.join(__dirname, "../../../reports");
+    const reportDir = path.join(__dirname, "../../../reports");
     const reportPath = writeOrdersReportXlsx({
       reportRows,
       reportDir,

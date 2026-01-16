@@ -79,13 +79,16 @@ export const getConnectionList = async () => {
     };
   }
 };
-export const getResourceQuery = async (resourceKey) => {
+export const getResourceQuery = async (resourceKey, extensionKey) => {
   try {
-    const list = await QueryModel.findOne({resourceKey})
+    console.log(resourceKey, extensionKey);
+    const query = await QueryModel.findOne({ resourceKey, extensionKey })
+    console.log(query);
+    
     return {
       status: true,
-      message: "Query get successfully",
-      data: list
+      message: "Query get successfully",  
+      data: query
     };
   } catch (err) {
     return {
