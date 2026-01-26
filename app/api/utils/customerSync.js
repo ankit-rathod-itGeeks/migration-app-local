@@ -41,21 +41,18 @@ function getTimestampForFilename() {
   );
 }
 
-function buildCustomersStatusXlsx(reportRows) {
+// ✅ NEW: Build report rows based on source sheet rows + extra cols
+function buildCustomersStatusXlsx(sourceRows) {
   const wb = XLSX.utils.book_new();
 
   const ws = XLSX.utils.json_to_sheet(
-    reportRows.map((r, i) => ({
-      "Sr No": i + 1,
-      "Customer Key": r.customerKey || "",
-      "Sheet Customer ID": r.sheetCustomerId || "",
-      Email: r.email || "",
-      Phone: r.phone || "",
-      "First Name": r.firstName || "",
-      "Last Name": r.lastName || "",
-      Status: r.status || "", // SUCCESS / FAILED
-      "Created Customer GID": r.createdCustomerId || "",
-      Reason: r.reason || "",
+    sourceRows.map((r) => ({
+      ...r, // all source columns
+      Status: r.Status ?? "",
+      Reason: r.Reason ?? "",
+      NewCustomerId: r.NewCustomerId ?? "",
+      Retry: r.Retry ?? "false",                 // ✅ NEW
+      "Retry Status": r["Retry Status"] ?? "",   // ✅ NEW (SUCCESS / FAILED / empty)
     })),
     { skipHeader: false }
   );
@@ -202,10 +199,7 @@ const ALLOWED_METAFIELD_TYPES = new Set([
 ]);
 
 function parseMetafieldHeader(header) {
-  // Expected format:
-  // Metafield: namespace.key[type]
   const match = header.match(/^Metafield:\s*([\w-]+)\.([\w-]+)\s*\[([^\]]+)\]$/);
-
   if (!match) return null;
 
   const namespace = match[1];
@@ -213,7 +207,9 @@ function parseMetafieldHeader(header) {
   const type = match[3];
 
   if (!ALLOWED_METAFIELD_TYPES.has(type)) {
-    console.warn(`⚠️ Unsupported CUSTOMER metafield type skipped: ${namespace}.${key} [${type}]`);
+    console.warn(
+      `⚠️ Unsupported CUSTOMER metafield type skipped: ${namespace}.${key} [${type}]`
+    );
     return null;
   }
 
@@ -238,7 +234,10 @@ async function ensureCustomerMetafieldDefinitions(metafields) {
     );
 
     const existing = new Map(
-      data.metafieldDefinitions.nodes.map((d) => [`${d.namespace}.${d.key}`, d.type.name])
+      data.metafieldDefinitions.nodes.map((d) => [
+        `${d.namespace}.${d.key}`,
+        d.type.name,
+      ])
     );
 
     for (const mf of metafields) {
@@ -294,29 +293,15 @@ function toBool(v) {
 
 function toDateTimeISO(v) {
   if (v === null || v === undefined || v === "") return null;
-
-  // Already a Date object (Excel sometimes gives this)
-  if (v instanceof Date && !isNaN(v.getTime())) {
-    return v.toISOString();
-  }
+  if (v instanceof Date && !isNaN(v.getTime())) return v.toISOString();
 
   const s = String(v).trim();
-
-  // Matrixify format: "YYYY-MM-DD HH:mm:ss ±HHMM"
-  // Convert → "YYYY-MM-DDTHH:mm:ss±HH:MM"
   const m = s.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) ([+-]\d{2})(\d{2})$/);
+  if (m) return `${m[1]}T${m[2]}${m[3]}:${m[4]}`;
 
-  if (m) {
-    return `${m[1]}T${m[2]}${m[3]}:${m[4]}`;
-  }
-
-  // Last resort: try Date parsing
   const d = new Date(s);
-  if (!isNaN(d.getTime())) {
-    return d.toISOString();
-  }
+  if (!isNaN(d.getTime())) return d.toISOString();
 
-  // If still invalid → DROP it (do NOT send bad DateTime to Shopify)
   console.warn(`⚠️ Invalid DateTime value skipped: "${s}"`);
   return null;
 }
@@ -325,32 +310,24 @@ function normalizePhone(raw) {
   if (!raw) return null;
 
   let s = String(raw).trim();
-
-  // Remove Excel apostrophe prefix
-  if (s.startsWith("'")) {
-    s = s.slice(1);
-  }
-
-  // Remove spaces, dashes, parentheses
+  if (s.startsWith("'")) s = s.slice(1);
   s = s.replace(/[()\-\s]/g, "");
 
-  // Must start with + or digit
   if (!/^\+?\d+$/.test(s)) {
     console.warn(`⚠️ Invalid phone skipped: "${raw}"`);
     return null;
   }
 
   // Ensure E.164 "+" prefix
-  if (!s.startsWith("+")) {
-    s = `+${s}`;
-  }
+  // if (!s.startsWith("+")) {
+  //   s = `+${s}`;
+  // }
 
   return s;
 }
 
 function splitTags(v) {
   if (isEmpty(v)) return null;
-  // Matrixify: comma separated list
   const tags = String(v)
     .split(",")
     .map((t) => t.trim())
@@ -361,7 +338,6 @@ function splitTags(v) {
 function normalizeEmailMarketingState(v) {
   if (isEmpty(v)) return null;
   const s = String(v).trim().toLowerCase();
-  // Matrixify allowed values
   switch (s) {
     case "invalid":
       return "INVALID";
@@ -414,6 +390,23 @@ function normalizeOptInLevel(v) {
   }
 }
 
+function isInvalidPhoneShopifyError(err) {
+  const msg = String(err?.message || err || "").toLowerCase();
+  if (msg.includes("phone") && msg.includes("invalid")) return true;
+
+  try {
+    const parsed = JSON.parse(err?.message || "");
+    if (Array.isArray(parsed)) {
+      return parsed.some((u) => {
+        const m = String(u?.message || "").toLowerCase();
+        const fieldStr = Array.isArray(u?.field) ? u.field.join(".") : String(u?.field || "");
+        return (m.includes("phone") && m.includes("invalid")) || fieldStr.toLowerCase().includes("phone");
+      });
+    }
+  } catch { }
+  return false;
+}
+
 async function graphqlRequest(endpoint, token, query, variables = {}, label = "") {
   const res = await fetch(endpoint, {
     method: "POST",
@@ -450,7 +443,6 @@ async function graphqlRequest(endpoint, token, query, variables = {}, label = ""
 function loadRows(fileBuffer) {
   const wb = XLSX.read(fileBuffer, { type: "buffer" });
 
-  // Matrixify: sheet name must be Customers / Customer
   const sheetName =
     wb.SheetNames.find((n) => String(n).trim().toLowerCase() === "customers") ||
     wb.SheetNames.find((n) => String(n).trim().toLowerCase() === "customer");
@@ -465,13 +457,17 @@ function loadRows(fileBuffer) {
   return XLSX.utils.sheet_to_json(sheet, { defval: null });
 }
 
+// ✅ NEW: Create an "incremental report" file and update it after every processed customer
+function initIncrementalReportFile() {
+  const timestamp = getTimestampForFilename();
+  const reportFileName = `reports/customers_upload_report_${timestamp}.xlsx`;
+  const absolutePath = path.join(process.cwd(), reportFileName);
+  ensureDir(path.dirname(absolutePath));
+  return { reportFileName, reportPath: absolutePath };
+}
+
 /**
  * Group rows into customers (multiple addresses per customer).
- * Group key priority (Matrixify-style):
- *  1) ID (if present)
- *  2) Email
- *  3) Phone
- *  4) First Name + Last Name
  */
 function makeCustomerKey(row) {
   const id = row["ID"];
@@ -517,7 +513,7 @@ function buildCustomersFromRows(rows, detectedMetafields) {
     if (!map.has(key)) {
       map.set(key, {
         _key: key,
-        // base fields
+        _sourceRow: row, // ✅ NEW: keep original row (for report)
         email: row["Email"] ?? null,
         firstName: row["First Name"] ?? null,
         lastName: row["Last Name"] ?? null,
@@ -537,20 +533,16 @@ function buildCustomersFromRows(rows, detectedMetafields) {
         smsMarketingUpdatedAt: row["SMS Marketing: Updated At"] ?? null,
 
         _metafields: new Map(),
-
         addresses: [],
       });
     }
 
     const c = map.get(key);
 
-    // Fill missing base values from any later row (no assumptions about which row is top)
     if (isEmpty(c.email) && !isEmpty(row["Email"])) c.email = row["Email"];
     if (isEmpty(c.firstName) && !isEmpty(row["First Name"])) c.firstName = row["First Name"];
     if (isEmpty(c.lastName) && !isEmpty(row["Last Name"])) c.lastName = row["Last Name"];
-    if (!c.phone && !isEmpty(row["Phone"])) {
-      c.phone = normalizePhone(row["Phone"]);
-    }
+    if (!c.phone && !isEmpty(row["Phone"])) c.phone = normalizePhone(row["Phone"]);
     if (isEmpty(c.locale) && !isEmpty(row["Language"])) c.locale = row["Language"];
     if (isEmpty(c.note) && !isEmpty(row["Note"])) c.note = row["Note"];
     if (c.taxExempt === null && row["Tax Exempt"] !== null && row["Tax Exempt"] !== "") {
@@ -579,14 +571,12 @@ function buildCustomersFromRows(rows, detectedMetafields) {
       if (isEmpty(raw)) continue;
 
       let value = String(raw);
-
       if (mf.type === "boolean") {
         const b = toBool(raw);
         if (b === null) continue;
         value = b ? "true" : "false";
       }
 
-      // LAST VALUE WINS (Matrixify behavior)
       c._metafields.set(`${mf.namespace}.${mf.key}`, {
         namespace: mf.namespace,
         key: mf.key,
@@ -595,7 +585,6 @@ function buildCustomersFromRows(rows, detectedMetafields) {
       });
     }
 
-    // Addresses
     if (hasAnyAddressData(row)) {
       const addrFirstName = !isEmpty(row["Address First Name"])
         ? row["Address First Name"]
@@ -613,14 +602,9 @@ function buildCustomersFromRows(rows, detectedMetafields) {
         address1: !isEmpty(row["Address Line 1"]) ? String(row["Address Line 1"]) : undefined,
         address2: !isEmpty(row["Address Line 2"]) ? String(row["Address Line 2"]) : undefined,
         city: !isEmpty(row["Address City"]) ? String(row["Address City"]) : undefined,
-        provinceCode: !isEmpty(row["Address Province Code"])
-          ? String(row["Address Province Code"])
-          : undefined,
-        countryCode: !isEmpty(row["Address Country Code"])
-          ? String(row["Address Country Code"])
-          : undefined,
+        provinceCode: !isEmpty(row["Address Province Code"]) ? String(row["Address Province Code"]) : undefined,
+        countryCode: !isEmpty(row["Address Country Code"]) ? String(row["Address Country Code"]) : undefined,
         zip: !isEmpty(row["Address Zip"]) ? String(row["Address Zip"]) : undefined,
-
         _isDefault: toBool(row["Address Is Default"]) === true,
       };
 
@@ -677,17 +661,14 @@ function buildCustomerInput(c) {
   if (!isEmpty(c.multipassIdentifier))
     input.multipassIdentifier = String(c.multipassIdentifier);
 
-  // Tags (CREATE only)
   const tags = splitTags(c.tagsRaw);
   if (tags) input.tags = tags;
 
-  // Email Marketing Consent
   const emState = normalizeEmailMarketingState(c.emailMarketingStatus);
   const emLevel = normalizeOptInLevel(c.emailMarketingLevel);
   const emUpdatedAt = toDateTimeISO(c.emailMarketingUpdatedAt);
 
   if (emState) {
-    // Shopify requires marketingState if object provided
     input.emailMarketingConsent = {
       marketingState: emState,
       ...(emLevel ? { marketingOptInLevel: emLevel } : {}),
@@ -695,7 +676,6 @@ function buildCustomerInput(c) {
     };
   }
 
-  // SMS Marketing Consent
   const smsState = normalizeSmsMarketingState(c.smsMarketingStatus);
   const smsLevel = normalizeOptInLevel(c.smsMarketingLevel);
   const smsUpdatedAt = toDateTimeISO(c.smsMarketingUpdatedAt);
@@ -722,11 +702,9 @@ function buildCustomerInput(c) {
     }
   }
 
-  // Addresses: order default first (Shopify default will effectively become first address)
   if (Array.isArray(c.addresses) && c.addresses.length) {
     const sorted = [...c.addresses].sort((a, b) => Number(b._isDefault) - Number(a._isDefault));
 
-    // Remove internal flags + drop completely empty address objects
     const cleaned = sorted
       .map(({ _isDefault, ...addr }) => addr)
       .filter((a) => Object.values(a).some((v) => !isEmpty(v)));
@@ -757,17 +735,15 @@ async function createCustomer(input) {
 }
 
 /**
- * MAIN (Express handler style like your other scripts)
+ * MAIN
  */
-export async function migrateCustomers(fileBuffer) {
+export async function migrateCustomers(fileBuffer, settings = {}) {
   if (!fileBuffer) {
     return { ok: false, error: "Missing file (req.file.buffer)" };
   }
 
   console.log("🚀 Starting Customers import (Sheet → Shopify) [CREATE ONLY] ...");
   console.log(`   Target: ${TARGET_SHOP}`);
-
-  const reportRows = []; // ✅ SUCCESS + FAILED (skip is tracked as SUCCESS with reason)
 
   const rows = loadRows(fileBuffer);
 
@@ -777,12 +753,23 @@ export async function migrateCustomers(fileBuffer) {
   await ensureCustomerMetafieldDefinitions(detectedMetafields);
 
   const customers = buildCustomersFromRows(rows, detectedMetafields);
-
   console.log(`✅ Parsed ${customers.length} customers from sheet`);
+
+  // ✅ NEW: incremental report file path
+  const { reportFileName, reportPath } = initIncrementalReportFile();
+
+  // ✅ NEW: report rows are "source rows + status fields"
+  const reportRows = []; // will be written after each record
 
   let createdCount = 0;
   let skippedCount = 0;
   let failedCount = 0;
+
+  // ✅ helper to write file after each processed record
+  function flushReportToDisk() {
+    const reportBuffer = buildCustomersStatusXlsx(reportRows);
+    saveReportToDisk(reportBuffer, reportFileName);
+  }
 
   for (let i = 0; i < customers.length; i++) {
     const c = customers[i];
@@ -790,36 +777,31 @@ export async function migrateCustomers(fileBuffer) {
     const labelPhone = !isEmpty(c.phone) ? String(c.phone) : "no-phone";
     const label = `#${i + 1} (${labelEmail}, ${labelPhone})`;
 
-    const customerKey = c._key || "";
-    const sheetCustomerId =
-      typeof customerKey === "string" && customerKey.startsWith("id:")
-        ? customerKey.slice(3)
-        : "";
-
     console.log(`\n➡️  Processing ${label}`);
 
+    let retry = false;
+    let retryStatus = false;
+
+    // ✅ Start report row from original sheet row (ALL COLUMNS)
+    const baseReportRow = { ...(c._sourceRow || {}) };
+
     try {
-      // Create-only requires at least email OR phone to safely de-dupe and to meet Shopify uniqueness constraints
       if (isEmpty(c.email) && isEmpty(c.phone)) {
         console.log("🟡 Skipping: both Email and Phone are empty (cannot check existence safely).");
         skippedCount++;
 
         reportRows.push({
-          customerKey,
-          sheetCustomerId,
-          email: c.email || "",
-          phone: c.phone || "",
-          firstName: c.firstName || "",
-          lastName: c.lastName || "",
-          status: "SUCCESS",
-          createdCustomerId: "",
-          reason: "Skipped: both Email and Phone are empty (cannot check existence safely)",
+          ...baseReportRow,
+          Status: "SUCCESS",
+          Reason: "Skipped: both Email and Phone are empty (cannot check existence safely)",
+          NewCustomerId: "",
+          Retry: retry ? "true" : "false",
+          "Retry Status": retryStatus ? "SUCCESS" : "",
         });
-
+        flushReportToDisk();
         continue;
       }
 
-      // Existence check
       let existingId = null;
       if (!isEmpty(c.email)) {
         existingId = await findExistingCustomerIdByEmail(c.email);
@@ -833,26 +815,49 @@ export async function migrateCustomers(fileBuffer) {
         skippedCount++;
 
         reportRows.push({
-          customerKey,
-          sheetCustomerId,
-          email: c.email || "",
-          phone: c.phone || "",
-          firstName: c.firstName || "",
-          lastName: c.lastName || "",
-          status: "SUCCESS",
-          createdCustomerId: existingId,
-          reason: "Customer already exists on target store (skipped)",
+          ...baseReportRow,
+          Status: "SUCCESS",
+          Reason: "Customer already exists on target store (skipped)",
+          NewCustomerId: existingId,
+          Retry: retry ? "true" : "false",
+          "Retry Status": retryStatus ? "SUCCESS" : "",
         });
-
+        flushReportToDisk();
         continue;
       }
 
       const input = buildCustomerInput(c);
 
-      // Final safeguard: Shopify will reject consent objects without required base fields
-      // (e.g., emailMarketingConsent usually expects email on create)
-      // We do not guess; Shopify will return userErrors if invalid.
-      const created = await createCustomer(input);
+      let created;
+      try {
+        created = await createCustomer(input);
+      } catch (err) {
+        console.log(`❌ Error creating customer`);
+        const shouldRetry =
+          settings?.retryIfFailed === true &&
+          input?.phone &&
+          isInvalidPhoneShopifyError(err);
+
+        console.log(
+          `❌ shouldRetry: ${shouldRetry}`,
+          settings?.retryIfFailed,
+          input?.phone,
+          isInvalidPhoneShopifyError(err)
+        );
+
+        if (shouldRetry) {
+          retry = true;
+
+          const retryInput = { ...input };
+          delete retryInput.phone;
+
+          console.log("🔁 Retry creating customer without phone (invalid phone detected)...");
+          created = await createCustomer(retryInput);
+          retryStatus = true;
+        } else {
+          throw err;
+        }
+      }
 
       console.log(
         `✅ Created customer: id=${created.id} email=${created.email ?? "n/a"} phone=${created.phone ?? "n/a"}`
@@ -860,32 +865,28 @@ export async function migrateCustomers(fileBuffer) {
       createdCount++;
 
       reportRows.push({
-        customerKey,
-        sheetCustomerId,
-        email: c.email || created.email || "",
-        phone: c.phone || created.phone || "",
-        firstName: c.firstName || created.firstName || "",
-        lastName: c.lastName || created.lastName || "",
-        status: "SUCCESS",
-        createdCustomerId: created.id || "",
-        reason: "",
+        ...baseReportRow,
+        Status: "SUCCESS",
+        Reason: "",
+        NewCustomerId: created.id || "",
+        Retry: retry ? "true" : "false",
+        "Retry Status": retry ? (retryStatus ? "SUCCESS" : "FAILED") : "",
       });
+      flushReportToDisk();
     } catch (err) {
       failedCount++;
       console.error(`❌ Failed ${label}`);
       console.error("   Reason:", String(err?.message || err));
 
       reportRows.push({
-        customerKey,
-        sheetCustomerId,
-        email: c.email || "",
-        phone: c.phone || "",
-        firstName: c.firstName || "",
-        lastName: c.lastName || "",
-        status: "FAILED",
-        createdCustomerId: "",
-        reason: formatFailureReason(err),
+        ...baseReportRow,
+        Status: "FAILED",
+        Reason: formatFailureReason(err),
+        NewCustomerId: "",
+        Retry: retry ? "true" : "false",
+        "Retry Status": retry ? (retryStatus ? "SUCCESS" : "FAILED") : "",
       });
+      flushReportToDisk();
     }
 
     await delay(650);
@@ -896,18 +897,6 @@ export async function migrateCustomers(fileBuffer) {
   console.log(`   🔁 Skipped:  ${skippedCount}`);
   console.log(`   ❌ Failed:   ${failedCount}`);
 
-  // ✅ Write report (same as products)
-  const reportBuffer = buildCustomersStatusXlsx(reportRows);
-
-  const timestamp = getTimestampForFilename();
-  const reportFileName = `reports/customers_upload_report_${timestamp}.xlsx`; // no leading "/"
-  const reportPath = saveReportToDisk(reportBuffer, reportFileName);
-
-  console.log(`📄 Customers report saved: ${reportPath}`);
-
-  // Optional: base64 for API response
-  // const reportBase64 = reportBuffer.toString("base64");
-
   const result = {
     ok: failedCount === 0,
     createdCount,
@@ -915,10 +904,9 @@ export async function migrateCustomers(fileBuffer) {
     failedCount,
     totalProcessed: customers.length,
     reportCount: reportRows.length,
-    successCount: reportRows.filter((r) => r.status === "SUCCESS").length,
-    failedReportCount: reportRows.filter((r) => r.status === "FAILED").length,
+    successCount: reportRows.filter((r) => r.Status === "SUCCESS").length,
+    failedReportCount: reportRows.filter((r) => r.Status === "FAILED").length,
     reportPath,
-    // reportBase64,
   };
 
   if (failedCount > 0) process.exitCode = 1;
