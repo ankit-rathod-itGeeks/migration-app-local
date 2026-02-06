@@ -14,7 +14,9 @@ function safeOriginalName(name) {
     return base.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 const ALLOWED_UPLOAD_TYPES = [".xlsx", ".xls", ".csv"];
-export const uploadResourceJob = async (resourceKey, file) => {
+export const uploadResourceJob = async (resourceKey, file, settings = {}) => {
+    console.log("settings==", settings);
+
 
     if (!(file instanceof File)) {
         return { status: false, message: "File is required" };
@@ -49,9 +51,10 @@ export const uploadResourceJob = async (resourceKey, file) => {
         message: "File uploaded",
         lockedAt: null,
         lockedBy: null,
+        settings: settings
     });
 
-    kickResourceJobWorkerAsync(resourceKey, file, job);
+    kickResourceJobWorkerAsync(resourceKey, file, job, settings);
 
     return {
         status: true,

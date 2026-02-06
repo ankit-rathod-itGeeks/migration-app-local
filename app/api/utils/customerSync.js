@@ -51,8 +51,8 @@ function buildCustomersStatusXlsx(sourceRows) {
       Status: r.Status ?? "",
       Reason: r.Reason ?? "",
       NewCustomerId: r.NewCustomerId ?? "",
-      Retry: r.Retry ?? "false",                 // ✅ NEW
-      "Retry Status": r["Retry Status"] ?? "",   // ✅ NEW (SUCCESS / FAILED / empty)
+      Retry: r.Retry ?? "false", // ✅ NEW
+      "Retry Status": r["Retry Status"] ?? "", // ✅ NEW (SUCCESS / FAILED / empty)
     })),
     { skipHeader: false }
   );
@@ -132,6 +132,60 @@ const CUSTOMER_CREATE_MUTATION = `
         taxExempt
         firstName
         lastName
+      }
+    }
+  }
+`;
+
+// ✅ NEW: Update customer (without consent updates)
+const CUSTOMER_UPDATE_MUTATION = `
+  mutation updateCustomerMetafields($input: CustomerInput!) {
+    customerUpdate(input: $input) {
+      customer {
+        id
+        metafields(first: 3) {
+          edges {
+            node {
+              id
+              namespace
+              key
+              value
+            }
+          }
+        }
+      }
+      userErrors {
+        message
+        field
+      }
+    }
+  }
+`;
+
+// ✅ NEW: Email marketing consent update (separate mutation)
+const CUSTOMER_EMAIL_MARKETING_CONSENT_UPDATE = `
+  mutation customerEmailMarketingConsentUpdate($input: CustomerEmailMarketingConsentUpdateInput!) {
+    customerEmailMarketingConsentUpdate(input: $input) {
+      customer { id }
+      userErrors { field message }
+    }
+  }
+`;
+
+// ✅ NEW: SMS marketing consent update (separate mutation)
+const CUSTOMER_SMS_MARKETING_CONSENT_UPDATE = `
+  mutation customerSmsMarketingConsentUpdate($input: CustomerSmsMarketingConsentUpdateInput!) {
+    customerSmsMarketingConsentUpdate(input: $input) {
+      userErrors { field message }
+      customer {
+        id
+        phone
+        smsMarketingConsent {
+          marketingState
+          marketingOptInLevel
+          consentUpdatedAt
+          consentCollectedFrom
+        }
       }
     }
   }
@@ -680,7 +734,7 @@ function buildCustomerInput(c) {
   const smsLevel = normalizeOptInLevel(c.smsMarketingLevel);
   const smsUpdatedAt = toDateTimeISO(c.smsMarketingUpdatedAt);
 
-  if (smsState) {
+  if (smsState && c.phone ) {
     input.smsMarketingConsent = {
       marketingState: smsState,
       ...(smsLevel ? { marketingOptInLevel: smsLevel } : {}),
@@ -726,6 +780,76 @@ async function createCustomer(input) {
   );
 
   const payload = data.customerCreate;
+  const errs = payload?.userErrors || [];
+  if (errs.length) {
+    throw new Error(JSON.stringify(errs, null, 2));
+  }
+
+  return payload.customer;
+}
+
+// ✅ NEW: Update customer (without consents)
+async function updateCustomer(input) {
+  console.log(`   Updating customer: ${JSON.stringify(input, null, 2)}`);
+  const data = await graphqlRequest(
+    TARGET_GQL,
+    TARGET_ACCESS_TOKEN,
+    CUSTOMER_UPDATE_MUTATION,
+    { input },
+    "customerUpdate"
+  );
+
+  const payload = data.customerUpdate;
+  const errs = payload?.userErrors || [];
+  if (errs.length) {
+    throw new Error(JSON.stringify(errs, null, 2));
+  }
+
+  return payload.customer;
+}
+
+// ✅ NEW: Update email marketing consent (separate mutation)
+async function updateCustomerEmailMarketingConsent(customerId, emailMarketingConsent) {
+  const input = {
+    customerId,
+    emailMarketingConsent,
+  };
+
+  console.log(`   Updating email marketing consent: ${JSON.stringify(input, null, 2)}`);
+  const data = await graphqlRequest(
+    TARGET_GQL,
+    TARGET_ACCESS_TOKEN,
+    CUSTOMER_EMAIL_MARKETING_CONSENT_UPDATE,
+    { input },
+    "customerEmailMarketingConsentUpdate"
+  );
+
+  const payload = data.customerEmailMarketingConsentUpdate;
+  const errs = payload?.userErrors || [];
+  if (errs.length) {
+    throw new Error(JSON.stringify(errs, null, 2));
+  }
+
+  return payload.customer;
+}
+
+// ✅ NEW: Update sms marketing consent (separate mutation)
+async function updateCustomerSmsMarketingConsent(customerId, smsMarketingConsent) {
+  const input = {
+    customerId,
+    smsMarketingConsent,
+  };
+
+  console.log(`   Updating SMS marketing consent: ${JSON.stringify(input, null, 2)}`);
+  const data = await graphqlRequest(
+    TARGET_GQL,
+    TARGET_ACCESS_TOKEN,
+    CUSTOMER_SMS_MARKETING_CONSENT_UPDATE,
+    { input },
+    "customerSmsMarketingConsentUpdate"
+  );
+
+  const payload = data.customerSmsMarketingConsentUpdate;
   const errs = payload?.userErrors || [];
   if (errs.length) {
     throw new Error(JSON.stringify(errs, null, 2));
@@ -810,17 +934,74 @@ export async function migrateCustomers(fileBuffer, settings = {}) {
         existingId = await findExistingCustomerIdByPhone(c.phone);
       }
 
+      // ✅ NEW: If exists => UPDATE (instead of skipping)
       if (existingId) {
-        console.log(`🟡 Customer already exists → ${existingId} (skipping)`);
+        console.log(`🟡 Customer already exists → ${existingId} (updating)`);
+
+        // Build full input from sheet, then remove consents (handled via separate mutations)
+        const baseInput = buildCustomerInput(c);
+
+        const emailMarketingConsent = baseInput.emailMarketingConsent;
+        const smsMarketingConsent = baseInput.smsMarketingConsent;
+
+        const updateInput = { ...baseInput, id: existingId };
+        delete updateInput.emailMarketingConsent;
+        delete updateInput.smsMarketingConsent;
+
+        let updated;
+        try {
+          updated = await updateCustomer(updateInput);
+        } catch (err) {
+          console.log(`❌ Error updating customer`);
+          const shouldRetry =
+            settings?.retryIfFailed === true &&
+            updateInput?.phone &&
+            isInvalidPhoneShopifyError(err);
+
+          console.log(
+            `❌ shouldRetry: ${shouldRetry}`,
+            settings?.retryIfFailed,
+            updateInput?.phone,
+            isInvalidPhoneShopifyError(err)
+          );
+
+          if (shouldRetry) {
+            retry = true;
+
+            const retryInput = { ...updateInput };
+            delete retryInput.phone;
+
+            console.log("🔁 Retry updating customer without phone (invalid phone detected)...");
+            updated = await updateCustomer(retryInput);
+            retryStatus = true;
+          } else {
+            throw err;
+          }
+        }
+
+        // ✅ NEW: Update marketing consents (separate mutations)
+        if (emailMarketingConsent) {
+          // Note: Shopify requires email field when setting email marketing consent
+          // Here, customer exists and we have customerId; mutation will handle it.
+          await updateCustomerEmailMarketingConsent(existingId, emailMarketingConsent);
+        }
+
+        if (smsMarketingConsent) {
+          // Note: Shopify typically needs phone on customer to meaningfully set SMS consent.
+          await updateCustomerSmsMarketingConsent(existingId, smsMarketingConsent);
+        }
+
+        console.log(`✅ Updated customer: id=${updated?.id || existingId}`);
+        // Keep counts same variables (no new counter added)
         skippedCount++;
 
         reportRows.push({
           ...baseReportRow,
           Status: "SUCCESS",
-          Reason: "Customer already exists on target store (skipped)",
+          Reason: "Customer already exists on target store (updated)",
           NewCustomerId: existingId,
           Retry: retry ? "true" : "false",
-          "Retry Status": retryStatus ? "SUCCESS" : "",
+          "Retry Status": retry ? (retryStatus ? "SUCCESS" : "FAILED") : "",
         });
         flushReportToDisk();
         continue;

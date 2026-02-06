@@ -37,7 +37,6 @@ export const action = async ({ request, params }) => {
   const path = params["*"];
 
   const body = await request.json();
-  console.log(body);
 
 
   if (method === "POST") {

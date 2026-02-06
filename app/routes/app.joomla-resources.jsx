@@ -78,7 +78,6 @@ export default function ResourcesPage() {
         setLoadingResourceKey("");
     }
     function handleExtensionChange(key) {
-        console.log(key);
         setExtension(key);
     }
 
@@ -107,13 +106,13 @@ export default function ResourcesPage() {
 
 
 
-                    <s-text-field
+                    {/* <s-text-field
                         value={query}
                         onChange={onChangeQuery}
                         placeholder="Search resources..."
                         clearButton
                         onClearButtonClick={() => onChangeQuery({ target: { value: "" } })}
-                    />
+                    /> */}
 
 
                     <s-stack gap="base">

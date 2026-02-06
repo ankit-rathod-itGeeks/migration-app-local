@@ -7,7 +7,7 @@ import fs from "fs";
 export const loader = async ({ request, params }) => {
   try {
     const url = new URL(request.url);
-    const pathname = params["*"]; 
+    const pathname = params["*"];
 
     const resourceKey = url.searchParams.get("resourceKey");
     const jobId = url.searchParams.get("jobId");
@@ -39,7 +39,7 @@ export const loader = async ({ request, params }) => {
         return sendResponse(200, true, "Jobs list", { jobs });
       }
 
-        case "download": {
+      case "download": {
         if (!jobId) {
           return sendResponse(400, false, "jobId is required");
         }
@@ -85,8 +85,9 @@ export const action = async ({ request }) => {
     const formData = await request.formData();
     const resourceKey = formData.get("resourceKey");
     const file = formData.get("file");
+    const settings = JSON.parse(formData.get("settings"));
 
-    const data = await uploadResourceJob(resourceKey, file);
+    const data = await uploadResourceJob(resourceKey, file, settings);
     return sendResponse(200, true, "uploadResourceJob", data);
 
   } catch (error) {

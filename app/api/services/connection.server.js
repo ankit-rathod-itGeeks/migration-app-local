@@ -23,7 +23,6 @@ export const connectToJoomla = async (body) => {
   try {
     const db = getJoomlaPool(body);
     const [rows] = await db.query("SELECT 1 AS ok");
-    console.log(rows);
     if (rows?.[0]?.ok !== 1) {
 
       await JoomlaConnectionModel.create({
@@ -81,9 +80,7 @@ export const getConnectionList = async () => {
 };
 export const getResourceQuery = async (resourceKey, extensionKey) => {
   try {
-    console.log(resourceKey, extensionKey);
     const query = await QueryModel.findOne({ resourceKey, extensionKey })
-    console.log(query);
     
     return {
       status: true,

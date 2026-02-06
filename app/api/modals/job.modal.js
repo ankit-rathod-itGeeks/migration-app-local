@@ -17,7 +17,7 @@ const ImportJobSchema = new mongoose.Schema(
     resourceKey: {
       type: String,
       required: true,
-      enum: ["products", "orders", "customers", "products"],
+      enum: ["products", "orders", "customers","blogs","pages"],
       index: true,
     },
 
@@ -46,6 +46,8 @@ const ImportJobSchema = new mongoose.Schema(
     // locking (so only one worker processes a job)
     lockedAt: { type: Date, default: null, index: true },
     lockedBy: { type: String, default: null },
+
+    settings: { type: Object, default: () => ({}) },
 
     // optional: helpful for idempotency / duplicate prevention later
     fileHash: { type: String, default: "", index: true }, // sha256/md5

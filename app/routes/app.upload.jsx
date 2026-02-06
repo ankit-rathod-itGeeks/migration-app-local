@@ -7,6 +7,11 @@ export default function Upload() {
   const [resourceKey, setResourceKey] = useState("products");
   const [file, setFile] = useState(null);
   const [status, setStatus] = useState("");
+  const [settings, setSettings] = useState({
+    retryIfFailed: true,
+  });
+  const retryErrorMessage = "Retry must be enabled to continue ";
+  const [retryError, setRetryError] = useState("");
 
   // loading state
   const [isUploading, setIsUploading] = useState(false);
@@ -70,7 +75,6 @@ export default function Upload() {
   async function pollJob(nextJobId) {
     console.log("⏳ Polling job status...");
     const id = nextJobId || jobId;
-    console.log("Job ID:", id);
     if (!id) return;
 
     try {
@@ -269,7 +273,9 @@ export default function Upload() {
       const fd = new FormData();
       fd.append("resourceKey", resourceKey);
       fd.append("file", file);
+      fd.append("settings", JSON.stringify(settings));
 
+      console.log(fd)
       const res = await fetch("/api/upload", { method: "POST", body: fd });
       const json = await res.json().catch(() => null);
 
@@ -343,6 +349,17 @@ export default function Upload() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resourceKey]);
 
+  function handleRetryIfFailedChange(e) {
+    const checked = e.currentTarget.checked;
+
+    setSettings((prev) => ({
+      ...prev,
+      retryIfFailed: checked,
+    }));
+
+    // setRetryError(checked ? "" : retryErrorMessage);
+  }
+
   return (
     <s-page heading="Fetch Resources">
       <s-stack gap="small">
@@ -356,8 +373,26 @@ export default function Upload() {
           <s-option value="products">Products</s-option>
           <s-option value="orders">Orders</s-option>
           <s-option value="customers">Customers</s-option>
+          <s-option value="blogs">Blogs</s-option>
         </s-select>
+        {
+          resourceKey === "customers" && <s-section>
+            <s-card>
+              <s-stack gap="small">
+                <s-text variant="headingMd">Settings</s-text>
 
+                <s-checkbox
+                  label="Retry if failed"
+                  details="If enabled, retry customer creation without a phone number when it’s invalid; otherwise, mark it as failed."
+                  checked={settings.retryIfFailed}
+                  // error={retryError}
+                  onChange={handleRetryIfFailedChange}
+                  disabled={isUploading}
+                />
+
+              </s-stack>
+            </s-card>
+          </s-section>}
         {/* Drop zone (key forces remount on clear) */}
         <s-drop-zone
           key={dropKey}
@@ -397,13 +432,6 @@ export default function Upload() {
         {jobInfo && jobInfo.resourceKey === resourceKey ? (
           <JobProgressBar job={jobInfo} />
         ) : null}
-
-        <s-card>
-          <s-stack gap="300">
-
-
-          </s-stack>
-        </s-card>
 
 
         <JobsListTable

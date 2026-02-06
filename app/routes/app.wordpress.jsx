@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import JoomlaFormModal from "./components/joomlaFormModal"; // adjust path if needed
+import WoocommerceFormModal from "./components/WoocommerceFormModal"; // adjust path if needed
 
-export default function JoomlaConnections() {
+export default function WordpressConnections() {
     const [query, setQuery] = useState("");
     const navigate = useNavigate();
-    const MODAL_ID = "joomla-connect-modal";
+    const MODAL_ID = "Woocommerce-connect-modal";
 
     // ✅ API driven list state
     const [connections, setConnections] = useState([]);
@@ -53,11 +53,11 @@ export default function JoomlaConnections() {
         return connections.filter((c) => {
             // support different backend field names safely
             const domain = c.domain || c.storeDomain || c.shopDomain || c.store || "";
-            const joomlaId = c.joomlaId || c.joomla_id || c.joomlaUser || "";
+            const WoocommerceId = c.WoocommerceId || c.Woocommerce_id || c.WoocommerceUser || "";
 
             return (
                 String(domain).toLowerCase().includes(q) ||
-                String(joomlaId).toLowerCase().includes(q)
+                String(WoocommerceId).toLowerCase().includes(q)
             );
         });
     }, [connections, query]);
@@ -67,7 +67,8 @@ export default function JoomlaConnections() {
         setQuery(next);
     }
     const handleView = (id) => {
-        navigate(`/app/joomla-resources?id=${id}`);
+        console.log("handleView", id);
+        navigate(`/app/Woocommerce-resources?id=${id}`);
     };
     return (
         <s-page>
@@ -106,7 +107,7 @@ export default function JoomlaConnections() {
                         <s-table>
                             <s-table-header-row>
                                 <s-table-header>Store domain</s-table-header>
-                                <s-table-header>Joomla User Name</s-table-header>
+                                <s-table-header>Woocommerce User Name</s-table-header>
                                 <s-table-header>Action</s-table-header>
                             </s-table-header-row>
 
@@ -168,7 +169,7 @@ export default function JoomlaConnections() {
                 </s-stack>
             </s-section>
 
-            <JoomlaFormModal
+            <WoocommerceFormModal
                 modalId={MODAL_ID}
                 onSuccess={() => {
                     fetchConnectionsList();

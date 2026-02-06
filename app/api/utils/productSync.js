@@ -338,7 +338,7 @@ async function ensureMetafieldDefinitions({
                 key: mf.key,
                 type: mf.type,
                 name: mf.key,
-                pin: true,
+                pin: false,
             },)
 
             const res = await graphqlRequest(
@@ -352,7 +352,7 @@ async function ensureMetafieldDefinitions({
                         key: mf.key,
                         type: mf.type,
                         name: mf.key,
-                        pin: true,
+                        pin: false,
                     },
                 },
                 "metafieldDefinitionCreate"

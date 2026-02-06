@@ -126,7 +126,6 @@ async function markCompleted(jobId, result) {
 async function runJob(job) {
   const jobId = job._id;
   const resourceKey = job.resourceKey;
-
   try {
     if (!job.uploadedFilePath || !fs.existsSync(job.uploadedFilePath)) {
       await markFailed(
@@ -156,7 +155,7 @@ async function runJob(job) {
         break;
       }
       case "customers": {
-        const result = await migrateCustomers(buffer);
+        const result = await migrateCustomers(buffer, job.settings);
         await markCompleted(jobId, result);
         break;
       }
@@ -209,9 +208,9 @@ export async function startImportJobWorker() {
 
   console.log(
     `🧵 Import worker started: WORKER_ID=${WORKER_ID} ` +
-      `MAX_JOBS_PER_PROCESS=${MAX_JOBS_PER_PROCESS} ` +
-      `WORKER_RESOURCE_KEY=${WORKER_RESOURCE_KEY || "ALL"} ` +
-      `POLL_INTERVAL_MS=${POLL_INTERVAL_MS}`
+    `MAX_JOBS_PER_PROCESS=${MAX_JOBS_PER_PROCESS} ` +
+    `WORKER_RESOURCE_KEY=${WORKER_RESOURCE_KEY || "ALL"} ` +
+    `POLL_INTERVAL_MS=${POLL_INTERVAL_MS}`
   );
 
   try {

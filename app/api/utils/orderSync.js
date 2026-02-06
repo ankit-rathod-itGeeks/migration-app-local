@@ -1902,7 +1902,7 @@ async function migrateParsedOrder(parsedOrder,
   if (!productHandle) {
     console.warn(`   ⚠️  Missing product handle for line "${li.title}"`);
     missingProducts.push(li.title || "UNKNOWN");
-    continue;
+    // continue;
   }
 
   const targetProduct = await checkProductExists(productHandle, productsCache);

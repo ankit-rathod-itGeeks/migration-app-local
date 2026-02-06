@@ -69,7 +69,6 @@ export default function Index() {
   };
 
   const handleNavigate = (path) => {
-    console.log("handleNavigate", path);
     navigate(path);
   };
 
